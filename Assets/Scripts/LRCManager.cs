@@ -1,3 +1,4 @@
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Text.RegularExpressions;
@@ -9,7 +10,10 @@ public class LRCManager : MonoBehaviour
     [SerializeField] private TMP_InputField inputField;
     public LRCFormat lrc;
 
-    private Regex lrcRegex = new Regex(@"\[(?<mm>\d\d):(?<ss>\d\d).(?<xx>\d\d)\](?<lyric>.*)|\[(?<tag>.*):(?<ctx>.*)\]");
+    // Regex refence
+    // https://stackoverflow.com/questions/14831484/validate-with-regex-for-lrc-file-in-javascript
+    private Regex lrcTagRegex = new Regex(@"\[(?<tag>[a-z]+):(?<ctx>.*)\]");
+    private Regex lrcRegex = new Regex(@"\[(?<mm>\d{2}):(?<ss>\d{2})(?>.(?<xx>\d{2}))?\](?>(?<gender>[FMD]): )?(?<lyric>.*)");
 
     public void OnButtonPress()
     {
@@ -19,18 +23,15 @@ public class LRCManager : MonoBehaviour
 
     public void LoadLrcText(string text)
     {
-        MatchCollection matches = lrcRegex.Matches(text);
-
+        MatchCollection matches = lrcTagRegex.Matches(text);
         foreach (Match match in matches)
         {
             InsertIdTag(match.Groups["tag"].Value, match.Groups["ctx"].Value);
-            InsertLyric(
-                match.Groups["mm"].Value,
-                match.Groups["ss"].Value,
-                match.Groups["xx"].Value,
-                match.Groups["lyric"].Value
-                );
         }
+
+        InsertLyric(text);
+
+        lrc.lyrics.Sort();
     }
 
     private void InsertIdTag(string tag, string ctx)
@@ -81,10 +82,53 @@ public class LRCManager : MonoBehaviour
         }
     }
 
-    private void InsertLyric(string mm, string ss, string xx, string lyric)
+    private void InsertLyric(string lyricText)
     {
-        if (mm == string.Empty) return;
-        lrc.lyrics.Add(new LRCLyricObject(float.Parse(mm), float.Parse(ss), float.Parse(xx), lyric));
+        if (lyricText == string.Empty) return;
+        MultiLyricCheck(lyricText);
+    }
+
+    private LRCLyricObject MultiLyricCheck(string lyric)
+    {
+        LRCLyricObject lyricObj = new LRCLyricObject();
+        var matches = lrcRegex.Matches(lyric);
+
+        if (matches.Count > 0)
+        {
+            foreach (Match match in matches)
+            {
+                lyricObj.minute = float.Parse(match.Groups["mm"].Value);
+                lyricObj.second = float.Parse(match.Groups["ss"].Value);
+                lyricObj.hundredth = float.Parse(match.Groups["xx"].Value == string.Empty ? "0" : match.Groups["xx"].Value);
+                lyricObj.lyric = MultiLyricCheck(match.Groups["lyric"].Value).lyric;
+
+                switch (match.Groups["gender"].Value)
+                {
+                    case "M":
+                        lyricObj.gender = Gender.Male;
+                        break;
+                    case "F":
+                        lyricObj.gender = Gender.Female;
+                        break;
+                    case "D":
+                        lyricObj.gender = Gender.Duet;
+                        break;
+                    default:
+                        lyricObj.gender = Gender.None;
+                        break;
+                }
+
+                lyricObj.Time();
+                lrc.lyrics.Add(lyricObj);
+
+            }
+        }
+        else
+        {
+            lyricObj.lyric = lyric;
+        }
+
+        return lyricObj;
     }
 }
 
@@ -140,7 +184,7 @@ public class LRCFormat
     public List<LRCLyricObject> lyrics;
     public void Clear()
     {
-        artist = string.Empty; 
+        artist = string.Empty;
         album = string.Empty;
         title = string.Empty;
         author = string.Empty;
@@ -155,20 +199,41 @@ public class LRCFormat
 }
 
 [System.Serializable]
-public struct LRCLyricObject
+public struct LRCLyricObject : IComparable<LRCLyricObject>
 {
     public double time;
     public float minute;
     public float second;
     public float hundredth;
+    public Gender gender;
     public string lyric;
 
-    public LRCLyricObject(float minute, float second, float hundredth, string lyric)
+    public double Time()
+    {
+        time = (minute * 60d) + second + (hundredth * .01d);
+        return time;
+    }
+
+    public LRCLyricObject(float minute, float second, float hundredth, string lyric, Gender gender = Gender.None)
     {
         this.minute = minute;
         this.second = second;
         this.hundredth = hundredth;
-        this.time = (minute * 60d) + second + (hundredth * .01d);
+        this.gender = gender;
+        time = (minute * 60d) + second + (hundredth * .01d);
         this.lyric = lyric;
     }
+
+    public int CompareTo(LRCLyricObject other)
+    {
+        return Time().CompareTo(other.Time());
+    }
+}
+
+public enum Gender
+{
+    None = 0,
+    Male = 1,
+    Female = 2,
+    Duet = 3
 }
